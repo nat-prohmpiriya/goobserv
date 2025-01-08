@@ -1,8 +1,9 @@
 package output
 
 import (
-	"encoding/json"
+	"fmt"
 	"os"
+	"time"
 
 	"github.com/nat-prohmpiriya/goobserv/pkg/core"
 )
@@ -27,50 +28,48 @@ func NewStdoutOutput(config StdoutConfig) *StdoutOutput {
 // Write writes entries to stdout
 func (o *StdoutOutput) Write(entries []*core.Entry) error {
 	for _, entry := range entries {
-		// Prepare log data
-		data := make(map[string]interface{})
-		if entry.Data != nil {
-			data = entry.Data
-		}
-		if entry.TraceID != "" {
-			data["trace_id"] = entry.TraceID
-		}
-		if entry.SpanID != "" {
-			data["span_id"] = entry.SpanID
-		}
-		if entry.RequestID != "" {
-			data["request_id"] = entry.RequestID
-		}
-
-		// Create log entry
-		logEntry := map[string]interface{}{
-			"timestamp": entry.Time.Format("2006-01-02T15:04:05.000Z07:00"),
-			"level":     entry.Level.String(),
-			"message":   entry.Message,
-			"data":      data,
-		}
-
-		// Add color if enabled
+		// Prepare color codes
+		var color, reset string
 		if o.config.Colored {
 			switch entry.Level {
 			case core.LevelDebug:
-				logEntry["color"] = "\033[36m" // Cyan
+				color = "\033[36m" // Cyan
 			case core.LevelInfo:
-				logEntry["color"] = "\033[32m" // Green
+				color = "\033[32m" // Green
 			case core.LevelWarn:
-				logEntry["color"] = "\033[33m" // Yellow
+				color = "\033[33m" // Yellow
 			case core.LevelError:
-				logEntry["color"] = "\033[31m" // Red
+				color = "\033[31m" // Red
 			}
-			if _, ok := logEntry["color"]; ok {
-				logEntry["reset"] = "\033[0m"
+			if color != "" {
+				reset = "\033[0m"
 			}
 		}
 
-		// Encode and write
-		if err := json.NewEncoder(os.Stdout).Encode(logEntry); err != nil {
-			return err
+		// Format log message
+		msg := fmt.Sprintf("%s[%s] %s | trace=%s span=%s",
+			color,
+			entry.Level.String(),
+			entry.Message,
+			entry.TraceID,
+			entry.SpanID,
+		)
+
+		// Add error if present
+		if entry.Data != nil {
+			if err, ok := entry.Data["error"]; ok {
+				msg += fmt.Sprintf(" | error=%v", err)
+			}
 		}
+
+		// Add reset code
+		msg += reset
+
+		// Write to stdout with timestamp
+		fmt.Fprintf(os.Stdout, "%s %s\n",
+			entry.Time.Format(time.RFC3339),
+			msg,
+		)
 	}
 
 	return nil

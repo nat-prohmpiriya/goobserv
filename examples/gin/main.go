@@ -14,11 +14,11 @@ func main() {
 	// Create observer
 	obs := core.NewObserver(core.Config{
 		BufferSize:    1000,
-		FlushInterval: time.Second,
+		FlushInterval: 1 * time.Second,
 	})
 	defer obs.Close()
 
-	// Add stdout output
+	// Add stdout output with color
 	stdout := output.NewStdoutOutput(output.StdoutConfig{
 		Colored: true,
 	})
@@ -46,7 +46,7 @@ func main() {
 		span, newCtx := obs.StartSpan(ctx, "process_hello")
 		defer obs.EndSpan(span)
 
-		// Log info
+		// Log info with new context
 		obs.Info(newCtx, "Processing hello request")
 
 		// Simulate work
@@ -66,13 +66,13 @@ func main() {
 		span, newCtx := obs.StartSpan(ctx, "process_error")
 		defer obs.EndSpan(span)
 
-		// Log error
+		// Log error with new context
 		obs.Error(newCtx, "Something went wrong").
 			WithError(fmt.Errorf("test error"))
 
-		// Return error
+		// Return error response
 		c.JSON(500, gin.H{
-			"error": "Internal Server Error",
+			"error": "Something went wrong",
 		})
 	})
 

@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/vongga-platform/goobserv/pkg/core"
-	fibermw "github.com/vongga-platform/goobserv/pkg/middleware/fiber"
-	"github.com/vongga-platform/goobserv/pkg/output"
+	"github.com/nat-prohmpiriya/goobserv/pkg/core"
+	fibermw "github.com/nat-prohmpiriya/goobserv/pkg/middleware/fiber"
+	"github.com/nat-prohmpiriya/goobserv/pkg/output"
 )
 
 func main() {

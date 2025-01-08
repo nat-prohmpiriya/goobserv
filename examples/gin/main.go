@@ -1,12 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/vongga-platform/goobserv/pkg/core"
-	ginmw "github.com/vongga-platform/goobserv/pkg/middleware/gin"
-	"github.com/vongga-platform/goobserv/pkg/output"
+	"github.com/nat-prohmpiriya/goobserv/pkg/core"
+	"github.com/nat-prohmpiriya/goobserv/pkg/output"
 )
 
 func main() {
@@ -28,7 +28,7 @@ func main() {
 
 	// Add middleware
 	r.Use(gin.Recovery())
-	r.Use(ginmw.Middleware(ginmw.Config{
+	r.Use(gin.Middleware(gin.Config{
 		Observer: obs,
 		SkipPaths: []string{
 			"/health",
@@ -39,7 +39,7 @@ func main() {
 	// Add routes
 	r.GET("/hello", func(c *gin.Context) {
 		// Get observer context
-		ctx := ginmw.GetContext(c)
+		ctx := gin.GetContext(c)
 
 		// Log info
 		obs.Info(ctx, "Processing hello request")
@@ -59,7 +59,7 @@ func main() {
 
 	r.GET("/error", func(c *gin.Context) {
 		// Get observer context
-		ctx := ginmw.GetContext(c)
+		ctx := gin.GetContext(c)
 
 		// Log error
 		obs.Error(ctx, "Something went wrong").

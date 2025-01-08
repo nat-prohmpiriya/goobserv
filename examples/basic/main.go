@@ -6,8 +6,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/vongga-platform/goobserv/pkg/core"
-	"github.com/vongga-platform/goobserv/pkg/output"
+	"github.com/nat-prohmpiriya/goobserv/pkg/core"
+	"github.com/nat-prohmpiriya/goobserv/pkg/output"
 )
 
 func main() {

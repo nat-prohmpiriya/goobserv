@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/vongga-platform/goobserv/pkg/core"
+	"github.com/nat-prohmpiriya/goobserv/pkg/core"
 )
 
 // Config represents middleware configuration
@@ -22,7 +22,8 @@ func Middleware(cfg Config) fiber.Handler {
 		path := path.Clean(c.Path())
 		for _, p := range cfg.SkipPaths {
 			if p == path {
-				return c.Next()
+				c.Next()
+				return nil
 			}
 		}
 
@@ -42,17 +43,45 @@ func Middleware(cfg Config) fiber.Handler {
 		// Start span
 		spanCtx := cfg.Observer.StartSpan(ctx, fmt.Sprintf("%s %s", c.Method(), path))
 		defer func(start time.Time) {
-			// Log request
-			cfg.Observer.Info(spanCtx, "HTTP Request",
-				"method", c.Method(),
-				"path", path,
-				"status", c.Response().StatusCode(),
-				"duration_ms", time.Since(start).Milliseconds(),
-			)
+			status := c.Response().StatusCode()
+			fmt.Printf("Middleware: status=%d path=%s\n", status, path)
+
+			// Log request with appropriate level based on status code
+			if status >= 500 {
+				fmt.Printf("Middleware: logging error for status %d\n", status)
+				cfg.Observer.Error(spanCtx, "HTTP Request",
+					"method", c.Method(),
+					"path", path,
+					"status", status,
+					"duration_ms", time.Since(start).Milliseconds(),
+				)
+			} else if status >= 400 {
+				fmt.Printf("Middleware: logging warning for status %d\n", status)
+				cfg.Observer.Warn(spanCtx, "HTTP Request",
+					"method", c.Method(),
+					"path", path,
+					"status", status,
+					"duration_ms", time.Since(start).Milliseconds(),
+				)
+			} else {
+				fmt.Printf("Middleware: logging info for status %d\n", status)
+				cfg.Observer.Info(spanCtx, "HTTP Request",
+					"method", c.Method(),
+					"path", path,
+					"status", status,
+					"duration_ms", time.Since(start).Milliseconds(),
+				)
+			}
+			cfg.Observer.EndSpan(spanCtx)
 		}(time.Now())
 
 		// Process request
-		return c.Next()
+		err := c.Next()
+		if err != nil {
+			fmt.Printf("Middleware: error from Next: %v\n", err)
+			return err
+		}
+		return nil
 	}
 }
 

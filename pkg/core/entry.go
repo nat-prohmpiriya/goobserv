@@ -2,7 +2,6 @@ package core
 
 import (
 	"time"
-	"your-project/pkg/core/level"
 )
 
 // EntryType represents the type of entry
@@ -17,7 +16,7 @@ const (
 // Entry represents a log entry
 type Entry struct {
 	Time      time.Time              `json:"time"`
-	Level     level.Level            `json:"level"`
+	Level     Level                  `json:"level"`
 	Message   string                 `json:"message"`
 	TraceID   string                 `json:"trace_id,omitempty"`
 	SpanID    string                 `json:"span_id,omitempty"`

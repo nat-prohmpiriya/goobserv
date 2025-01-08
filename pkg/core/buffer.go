@@ -2,28 +2,7 @@ package core
 
 import (
 	"sync"
-	"time"
 )
-
-// BufferMetrics represents buffer performance metrics
-type BufferMetrics struct {
-	entriesAdded    *Counter
-	entriesDropped  *Counter
-	bufferSize      *Gauge
-	flushLatency    *Histogram
-	memoryUsage     *Gauge
-}
-
-// NewBufferMetrics creates buffer metrics
-func NewBufferMetrics(observer *Observer) *BufferMetrics {
-	return &BufferMetrics{
-		entriesAdded:   observer.Counter("buffer_entries_added_total"),
-		entriesDropped: observer.Counter("buffer_entries_dropped_total"),
-		bufferSize:     observer.Gauge("buffer_size_current"),
-		flushLatency:   observer.Histogram("buffer_flush_duration_ms", []float64{1, 5, 10, 50, 100, 500}),
-		memoryUsage:    observer.Gauge("buffer_memory_bytes"),
-	}
-}
 
 // Pool represents an object pool for entries
 type Pool struct {
@@ -58,9 +37,8 @@ func (p *Pool) GetEntry() *Entry {
 func (p *Pool) PutEntry(entry *Entry) {
 	// Clear entry data
 	entry.Message = ""
-	entry.Level = 0
-	entry.Type = 0
-	entry.Context = nil
+	entry.Level = LevelDebug
+	entry.Type = LogEntry
 	for k := range entry.Data {
 		delete(entry.Data, k)
 	}
@@ -109,11 +87,10 @@ func (b *RingBuffer) ReadAll() []*Entry {
 
 	entries := make([]*Entry, 0, b.size)
 	for i := 0; i < b.size; i++ {
-		idx := (b.pos - i - 1 + b.size) % b.size
-		if b.entries[idx] != nil {
-			entries = append(entries, b.entries[idx])
+		pos := (b.pos - i - 1 + b.size) % b.size
+		if b.entries[pos] != nil {
+			entries = append(entries, b.entries[pos])
 		}
 	}
-
 	return entries
 }

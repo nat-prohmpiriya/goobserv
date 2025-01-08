@@ -4,98 +4,69 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sync"
+	"time"
 
-	"github.com/vongga-platform/goobserv/pkg/core"
+	"github.com/nat-prohmpiriya/goobserv/pkg/core"
 )
 
-// StdoutOutput represents console output handler
-type StdoutOutput struct {
-	colored bool
-	mu      sync.Mutex
+// StdoutOutput represents stdout output handler
+type StdoutOutput struct{}
+
+// NewStdoutOutput creates a new stdout output handler
+func NewStdoutOutput() *StdoutOutput {
+	return &StdoutOutput{}
 }
 
-// StdoutConfig represents stdout configuration
-type StdoutConfig struct {
-	Colored bool
-}
+// Write writes entries to stdout
+func (o *StdoutOutput) Write(entries []*core.Entry) error {
+	for _, entry := range entries {
+		// Format timestamp
+		timestamp := entry.Time.Format(time.RFC3339)
 
-// NewStdoutOutput creates a new stdout output
-func NewStdoutOutput(config StdoutConfig) *StdoutOutput {
-	return &StdoutOutput{
-		colored: config.Colored,
-	}
-}
-
-// Write writes an entry to stdout
-func (o *StdoutOutput) Write(entry *core.Entry) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	// Format entry
-	data := map[string]interface{}{
-		"timestamp": entry.Timestamp,
-		"level":     entry.Level.String(),
-		"message":   entry.Message,
-	}
-
-	// Add context if available
-	if entry.Context != nil {
-		if entry.Context.TraceID() != "" {
-			data["trace_id"] = entry.Context.TraceID()
+		// Format data
+		data := make(map[string]interface{})
+		for k, v := range entry.Data {
+			data[k] = v
 		}
-		if entry.Context.SpanID() != "" {
-			data["span_id"] = entry.Context.SpanID()
+
+		// Add trace and request IDs
+		if entry.TraceID != "" {
+			data["trace_id"] = entry.TraceID
 		}
-		if attrs := entry.Context.Attributes(); len(attrs) > 0 {
-			data["attributes"] = attrs
+		if entry.SpanID != "" {
+			data["span_id"] = entry.SpanID
 		}
-	}
+		if entry.RequestID != "" {
+			data["request_id"] = entry.RequestID
+		}
 
-	// Add extra fields
-	if len(entry.Data) > 0 {
-		data["data"] = entry.Data
-	}
+		// Create log entry
+		logEntry := map[string]interface{}{
+			"timestamp": timestamp,
+			"level":     entry.Level.String(),
+			"message":   entry.Message,
+			"data":      data,
+		}
 
-	// Convert to JSON
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
+		// Marshal to JSON
+		jsonBytes, err := json.Marshal(logEntry)
+		if err != nil {
+			return fmt.Errorf("failed to marshal log entry: %v", err)
+		}
 
-	// Write to stdout
-	if o.colored {
-		color := o.levelColor(entry.Level)
-		fmt.Fprintf(os.Stdout, "%s%s%s\n", color, string(jsonData), "\033[0m")
-	} else {
-		fmt.Fprintln(os.Stdout, string(jsonData))
+		// Write to stdout
+		fmt.Fprintln(os.Stdout, string(jsonBytes))
 	}
 
 	return nil
 }
 
-// Flush implements Output interface
+// Flush flushes the output
 func (o *StdoutOutput) Flush() error {
 	return nil
 }
 
-// Close implements Output interface
+// Close closes the output
 func (o *StdoutOutput) Close() error {
 	return nil
-}
-
-// levelColor returns ANSI color code for log level
-func (o *StdoutOutput) levelColor(level core.Level) string {
-	switch level {
-	case core.DebugLevel:
-		return "\033[37m" // white
-	case core.InfoLevel:
-		return "\033[32m" // green
-	case core.WarnLevel:
-		return "\033[33m" // yellow
-	case core.ErrorLevel:
-		return "\033[31m" // red
-	default:
-		return "\033[0m" // default
-	}
 }

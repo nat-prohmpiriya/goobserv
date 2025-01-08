@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/vongga-platform/goobserv/pkg/core"
+	"github.com/nat-prohmpiriya/goobserv/pkg/core"
 )
 
 // Config represents middleware configuration
@@ -50,6 +50,7 @@ func Middleware(cfg Config) gin.HandlerFunc {
 				"status", c.Writer.Status(),
 				"duration_ms", time.Since(start).Milliseconds(),
 			)
+			cfg.Observer.EndSpan(spanCtx)
 		}(time.Now())
 
 		// Process request

@@ -3,48 +3,48 @@ package output
 import (
 	"sync"
 
-	"github.com/vongga-platform/goobserv/pkg/core"
+	"github.com/nat-prohmpiriya/goobserv/pkg/core"
 )
 
-// TestOutput is an output handler for testing
+// TestOutput represents test output handler
 type TestOutput struct {
 	entries []*core.Entry
 	mu      sync.RWMutex
 }
 
-// Write writes an entry to the test output
-func (o *TestOutput) Write(entry *core.Entry) error {
+// Write writes entries to test output
+func (o *TestOutput) Write(entries []*core.Entry) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.entries = append(o.entries, entry)
+	o.entries = append(o.entries, entries...)
 	return nil
 }
 
-// Flush flushes the test output
+// Flush flushes the output
 func (o *TestOutput) Flush() error {
 	return nil
 }
 
-// Close closes the test output
+// Close closes the output
 func (o *TestOutput) Close() error {
 	return nil
 }
 
-// Reset resets the test output
+// Reset resets test output
 func (o *TestOutput) Reset() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.entries = nil
 }
 
-// HasEntries returns true if the output has entries
+// HasEntries returns true if test output has entries
 func (o *TestOutput) HasEntries() bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return len(o.entries) > 0
 }
 
-// LastEntry returns the last entry
+// LastEntry returns last entry
 func (o *TestOutput) LastEntry() *core.Entry {
 	o.mu.RLock()
 	defer o.mu.RUnlock()

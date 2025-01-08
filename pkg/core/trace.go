@@ -1,6 +1,8 @@
 package core
 
 import (
+	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -34,12 +36,48 @@ type SpanEvent struct {
 	Attributes map[string]interface{}
 }
 
+// TraceID generates a new trace ID
+func TraceID() string {
+	return generateID("trace")
+}
+
+// SpanID generates a new span ID
+func SpanID() string {
+	return generateID("span")
+}
+
+// RequestID generates a new request ID
+func RequestID() string {
+	return generateID("req")
+}
+
+// generateID generates a new ID with prefix
+func generateID(prefix string) string {
+	// Initialize random seed
+	rand.Seed(time.Now().UnixNano())
+
+	// Generate random bytes
+	b := make([]byte, 16)
+	for i := range b {
+		b[i] = byte(rand.Intn(256))
+	}
+
+	// Format ID
+	return fmt.Sprintf("%s-%x-%x-%x-%x",
+		prefix,
+		b[0:4],
+		b[4:6],
+		b[6:8],
+		b[8:],
+	)
+}
+
 // NewSpan creates a new span
 func NewSpan(name string, ctx *Context) *Span {
 	return &Span{
-		TraceID:    ctx.TraceID(),
-		SpanID:     ctx.SpanID(),
-		ParentID:   ctx.ParentID(),
+		TraceID:    TraceID(),
+		SpanID:     SpanID(),
+		ParentID:   "",
 		Name:       name,
 		StartTime:  time.Now(),
 		Status:     SpanStatusOK,

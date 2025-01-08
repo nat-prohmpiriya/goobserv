@@ -1,8 +1,13 @@
 package core
 
-// Output represents an output handler interface
+// Output represents output handler interface
 type Output interface {
-	Write(entry *Entry) error
+	// Write writes entries to output
+	Write(entries []*Entry) error
+
+	// Flush flushes the output
 	Flush() error
+
+	// Close closes the output
 	Close() error
 }

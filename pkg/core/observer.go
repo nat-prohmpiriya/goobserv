@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -13,31 +12,31 @@ type Config struct {
 	FlushInterval time.Duration
 }
 
-// Observer represents an observability handler
+// Observer represents an observer instance
 type Observer struct {
-	buffer   *RingBuffer
-	outputs  []Output
-	wg       sync.WaitGroup
-	stopChan chan struct{}
+	outputs []Output
+	buffer  chan *Entry
+	done   chan struct{}
+	closed bool
+	mu     sync.Mutex
+	wg     sync.WaitGroup
 }
 
-// NewObserver creates a new observer
+// NewObserver creates a new observer instance
 func NewObserver(cfg Config) *Observer {
-	if cfg.BufferSize <= 0 {
-		cfg.BufferSize = 1000
-	}
+	// Ensure minimum flush interval
 	if cfg.FlushInterval <= 0 {
-		cfg.FlushInterval = time.Second
+		cfg.FlushInterval = 100 * time.Millisecond
 	}
 
 	obs := &Observer{
-		buffer:   NewRingBuffer(cfg.BufferSize),
-		outputs:  make([]Output, 0),
-		stopChan: make(chan struct{}),
+		buffer: make(chan *Entry, cfg.BufferSize),
+		done:   make(chan struct{}),
 	}
 
+	// Start worker
 	obs.wg.Add(1)
-	go obs.flushLoop(cfg.FlushInterval)
+	go obs.worker(cfg.FlushInterval)
 
 	return obs
 }
@@ -48,107 +47,132 @@ func (o *Observer) AddOutput(output Output) {
 }
 
 // StartSpan starts a new span
-func (o *Observer) StartSpan(ctx context.Context, name string) *Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return NewContext(ctx)
+func (o *Observer) StartSpan(ctx *Context, name string) *Context {
+	return ctx.WithSpan(name)
 }
 
-// Info logs an info message
-func (o *Observer) Info(ctx context.Context, msg string, args ...interface{}) {
-	o.log(ctx, LevelInfo, msg, args...)
-}
-
-// Error logs an error message
-func (o *Observer) Error(ctx context.Context, msg string, args ...interface{}) {
-	o.log(ctx, LevelError, msg, args...)
+// EndSpan ends the current span
+func (o *Observer) EndSpan(ctx *Context) {
+	ctx.EndSpan()
 }
 
 // Debug logs a debug message
-func (o *Observer) Debug(ctx context.Context, msg string, args ...interface{}) {
+func (o *Observer) Debug(ctx *Context, msg string, args ...interface{}) {
 	o.log(ctx, LevelDebug, msg, args...)
 }
 
+// Info logs an info message
+func (o *Observer) Info(ctx *Context, msg string, args ...interface{}) {
+	o.log(ctx, LevelInfo, msg, args...)
+}
+
 // Warn logs a warning message
-func (o *Observer) Warn(ctx context.Context, msg string, args ...interface{}) {
+func (o *Observer) Warn(ctx *Context, msg string, args ...interface{}) {
 	o.log(ctx, LevelWarn, msg, args...)
+}
+
+// Error logs an error message
+func (o *Observer) Error(ctx *Context, msg string, args ...interface{}) {
+	o.log(ctx, LevelError, msg, args...)
 }
 
 // Close closes the observer
 func (o *Observer) Close() error {
-	close(o.stopChan)
-	o.wg.Wait()
+	o.mu.Lock()
+	if o.closed {
+		o.mu.Unlock()
+		return nil
+	}
+	o.closed = true
+	close(o.done)
+	o.mu.Unlock()
 
-	// Flush remaining entries
-	o.flush()
+	o.wg.Wait()
 
 	// Close outputs
 	for _, output := range o.outputs {
 		if err := output.Close(); err != nil {
-			return fmt.Errorf("failed to close output: %v", err)
+			return err
 		}
 	}
 
 	return nil
 }
 
-func (o *Observer) log(ctx context.Context, level Level, msg string, args ...interface{}) {
-	if len(args) > 0 {
-		msg = fmt.Sprintf(msg, args...)
-	}
-
-	var obsCtx *Context
-	if c, ok := ctx.(*Context); ok {
-		obsCtx = c
-	} else {
-		obsCtx = NewContext(ctx)
-	}
-
+// log logs a message with the given level
+func (o *Observer) log(ctx *Context, level Level, msg string, args ...interface{}) {
+	// Create entry
 	entry := &Entry{
 		Time:      time.Now(),
 		Level:     level,
 		Message:   msg,
-		TraceID:   obsCtx.TraceID(),
-		SpanID:    obsCtx.SpanID(),
-		ParentID:  obsCtx.ParentID(),
-		Data:      obsCtx.Attributes(),
-		RequestID: obsCtx.RequestID(),
+		TraceID:   ctx.TraceID(),
+		SpanID:    ctx.SpanID(),
+		RequestID: ctx.RequestID(),
+		Data:      make(map[string]interface{}),
 	}
 
-	o.buffer.Write(entry)
+	// Add data
+	for i := 0; i < len(args)-1; i += 2 {
+		if key, ok := args[i].(string); ok {
+			entry.Data[key] = args[i+1]
+		}
+	}
+
+	// Send entry to buffer
+	select {
+	case o.buffer <- entry:
+		fmt.Printf("Observer: entry sent to buffer: %s\n", entry.Message)
+	default:
+		fmt.Printf("Observer: buffer full, dropping entry: %s\n", entry.Message)
+	}
 }
 
-func (o *Observer) flushLoop(interval time.Duration) {
+// worker processes entries from buffer
+func (o *Observer) worker(interval time.Duration) {
 	defer o.wg.Done()
 
+	fmt.Printf("Observer: worker started with interval %v\n", interval)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	entries := make([]*Entry, 0)
+
 	for {
 		select {
+		case entry := <-o.buffer:
+			fmt.Printf("Observer: received entry from buffer: %s\n", entry.Message)
+			entries = append(entries, entry)
 		case <-ticker.C:
-			o.flush()
-		case <-o.stopChan:
+			if len(entries) > 0 {
+				fmt.Printf("Observer: flushing %d entries\n", len(entries))
+				o.flush(entries)
+				entries = make([]*Entry, 0)
+			}
+		case <-o.done:
+			if len(entries) > 0 {
+				fmt.Printf("Observer: final flush of %d entries\n", len(entries))
+				o.flush(entries)
+			}
+			fmt.Println("Observer: worker stopped")
 			return
 		}
 	}
 }
 
-func (o *Observer) flush() {
-	entries := o.buffer.ReadAll()
-	if len(entries) == 0 {
-		return
+// flush flushes entries to outputs
+func (o *Observer) flush(entries []*Entry) {
+	for _, output := range o.outputs {
+		if err := output.Write(entries); err != nil {
+			// Handle error
+			continue
+		}
 	}
 
 	for _, output := range o.outputs {
-		for _, entry := range entries {
-			if err := output.Write(entry); err != nil {
-				fmt.Printf("Failed to write entry: %v\n", err)
-			}
-		}
 		if err := output.Flush(); err != nil {
-			fmt.Printf("Failed to flush output: %v\n", err)
+			// Handle error
+			continue
 		}
 	}
 }

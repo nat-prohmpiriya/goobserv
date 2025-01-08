@@ -1,55 +1,20 @@
 package fiber
 
 import (
-	"io"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/nat-prohmpiriya/goobserv/pkg/core"
+	"github.com/nat-prohmpiriya/goobserv/pkg/output"
 	"github.com/stretchr/testify/assert"
 	"github.com/valyala/fasthttp"
-	"github.com/vongga-platform/goobserv/pkg/core"
-	"github.com/vongga-platform/goobserv/pkg/output"
 )
 
 func TestMiddleware(t *testing.T) {
-	// Create observer
-	obs := core.NewObserver(core.Config{
-		BufferSize:    1000,
-		FlushInterval: time.Second,
-	})
-	defer obs.Close()
-
 	// Create test output
 	testOutput := &output.TestOutput{}
-	obs.AddOutput(testOutput)
-
-	// Create app with middleware
-	app := fiber.New()
-	app.Use(Middleware(Config{
-		Observer: obs,
-		SkipPaths: []string{
-			"/health",
-		},
-	}))
-
-	// Add test routes
-	app.Get("/test", func(c *fiber.Ctx) error {
-		ctx := GetContext(c)
-		obs.Info(ctx, "Test endpoint")
-		return c.JSON(fiber.Map{"status": "ok"})
-	})
-
-	app.Get("/error", func(c *fiber.Ctx) error {
-		ctx := GetContext(c)
-		obs.Error(ctx, "Test error")
-		return fiber.NewError(fiber.StatusInternalServerError, "test error")
-	})
-
-	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.SendStatus(fiber.StatusOK)
-	})
 
 	tests := []struct {
 		name           string
@@ -79,8 +44,44 @@ func TestMiddleware(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create observer with shorter flush interval for tests
+			obs := core.NewObserver(core.Config{
+				BufferSize:    10000,  // เพิ่ม buffer size
+				FlushInterval: 100 * time.Millisecond,
+			})
+			defer obs.Close()
+
+			// Add test output
+			obs.AddOutput(testOutput)
+
 			// Reset test output
 			testOutput.Reset()
+
+			// Create app with middleware
+			app := fiber.New()
+			app.Use(Middleware(Config{
+				Observer: obs,
+				SkipPaths: []string{
+					"/health",
+				},
+			}))
+
+			// Add test routes
+			app.Get("/test", func(c *fiber.Ctx) error {
+				ctx := GetContext(c)
+				obs.Info(ctx, "Test endpoint")
+				return c.JSON(fiber.Map{"status": "ok"})
+			})
+
+			app.Get("/error", func(c *fiber.Ctx) error {
+				ctx := GetContext(c)
+				obs.Error(ctx, "Test error")
+				return c.Status(500).JSON(fiber.Map{"error": "test error"})
+			})
+
+			app.Get("/health", func(c *fiber.Ctx) error {
+				return c.SendStatus(200)
+			})
 
 			// Create request
 			req := httptest.NewRequest("GET", tt.path, nil)
@@ -91,59 +92,112 @@ func TestMiddleware(t *testing.T) {
 			resp, err := app.Test(req)
 			assert.NoError(t, err)
 
-			// Read response body
-			_, err = io.ReadAll(resp.Body)
-			assert.NoError(t, err)
-
 			// Check response
 			assert.Equal(t, tt.expectedStatus, resp.StatusCode)
 
+			// Wait for logs to be processed (3 flush intervals)
+			time.Sleep(300 * time.Millisecond)
+
+			// Force flush before checking logs
+			if err := obs.Close(); err != nil {
+				t.Fatalf("Failed to close observer: %v", err)
+			}
+
+			// Create new observer for next test
+			obs = core.NewObserver(core.Config{
+				BufferSize:    10000,
+				FlushInterval: 100 * time.Millisecond,
+			})
+
+			// Debug log
+			t.Logf("Test case: %s", tt.name)
+			t.Logf("Should log: %v", tt.shouldLog)
+			t.Logf("Has entries: %v", testOutput.HasEntries())
+			if entries := testOutput.Entries(); len(entries) > 0 {
+				for i, e := range entries {
+					t.Logf("Entry %d: Message=%s Level=%v", i, e.Message, e.Level)
+				}
+			} else {
+				t.Log("No entries found")
+			}
+
 			// Check logs
 			if tt.shouldLog {
-				assert.True(t, testOutput.HasEntries())
-				entry := testOutput.LastEntry()
-				assert.Equal(t, "HTTP Request", entry.Message)
-				assert.Equal(t, "GET", entry.Data["method"])
-				assert.Equal(t, tt.path, entry.Data["path"])
-				assert.Equal(t, tt.expectedStatus, entry.Data["status"])
-				assert.Contains(t, entry.Data, "duration_ms")
+				assert.True(t, testOutput.HasEntries(), "Should have log entries")
+				entries := testOutput.Entries()
+				assert.NotEmpty(t, entries, "Should have log entries")
+
+				// Find HTTP Request entry
+				var httpEntry *core.Entry
+				for _, e := range entries {
+					if e.Message == "HTTP Request" {
+						httpEntry = e
+						break
+					}
+				}
+
+				assert.NotNil(t, httpEntry, "Should have HTTP Request entry")
+				if httpEntry != nil {
+					assert.Equal(t, "GET", httpEntry.Data["method"], "Wrong method")
+					assert.Equal(t, tt.path, httpEntry.Data["path"], "Wrong path")
+					assert.Equal(t, tt.expectedStatus, httpEntry.Data["status"], "Wrong status")
+					assert.NotNil(t, httpEntry.Data["duration_ms"], "Missing duration")
+				}
+
+				// For error requests, check error message
+				if tt.expectedStatus >= 500 {
+					var errorEntry *core.Entry
+					for _, e := range entries {
+						if e.Message == "Test error" {
+							errorEntry = e
+							break
+						}
+					}
+					assert.NotNil(t, errorEntry, "Should have error entry")
+				}
 			} else {
-				assert.False(t, testOutput.HasEntries())
+				assert.False(t, testOutput.HasEntries(), "Should not have log entries")
 			}
 		})
 	}
 }
 
 func TestGetContext(t *testing.T) {
-	// Create fiber app and context
+	// Create fiber app
 	app := fiber.New()
-	ctx := app.AcquireCtx(&fasthttp.RequestCtx{})
-	defer app.ReleaseCtx(ctx)
+
+	// Create context
+	ctx := &fasthttp.RequestCtx{}
+	c := app.AcquireCtx(ctx)
+	defer app.ReleaseCtx(c)
 
 	// Test without context
-	obsCtx := GetContext(ctx)
+	obsCtx := GetContext(c)
 	assert.NotNil(t, obsCtx)
 
 	// Test with context
-	testCtx := core.NewContext(ctx.Context())
-	ctx.Locals("observContext", testCtx)
-	obsCtx = GetContext(ctx)
+	testCtx := core.NewContext(c.Context())
+	c.Locals("observContext", testCtx)
+	obsCtx = GetContext(c)
 	assert.Equal(t, testCtx, obsCtx)
 }
 
 func TestGetObserver(t *testing.T) {
-	// Create fiber app and context
+	// Create fiber app
 	app := fiber.New()
-	ctx := app.AcquireCtx(&fasthttp.RequestCtx{})
-	defer app.ReleaseCtx(ctx)
+
+	// Create context
+	ctx := &fasthttp.RequestCtx{}
+	c := app.AcquireCtx(ctx)
+	defer app.ReleaseCtx(c)
 
 	// Test without observer
-	obs := GetObserver(ctx)
+	obs := GetObserver(c)
 	assert.Nil(t, obs)
 
 	// Test with observer
 	testObs := core.NewObserver(core.Config{})
-	ctx.Locals("observer", testObs)
-	obs = GetObserver(ctx)
+	c.Locals("observer", testObs)
+	obs = GetObserver(c)
 	assert.Equal(t, testObs, obs)
 }

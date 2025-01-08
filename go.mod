@@ -1,4 +1,4 @@
-module github.com/vongga-platform/goobserv
+module github.com/nat-prohmpiriya/goobserv
 
 go 1.23.4
 

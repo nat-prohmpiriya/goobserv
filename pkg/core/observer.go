@@ -29,6 +29,18 @@ func NewObserver(cfg Config) *Observer {
 		cfg.FlushInterval = 100 * time.Millisecond
 	}
 
+	// Set default buffer size
+	// Calculate based on expected log rate and flush interval
+	// Assuming max 1000 logs/second with 2x safety factor
+	if cfg.BufferSize <= 0 {
+		expectedLogsPerSecond := 1000
+		safetyFactor := 2
+		cfg.BufferSize = int(float64(expectedLogsPerSecond) * cfg.FlushInterval.Seconds() * float64(safetyFactor))
+		if cfg.BufferSize < 100 {
+			cfg.BufferSize = 100  // Minimum buffer size
+		}
+	}
+
 	obs := &Observer{
 		buffer: make(chan *Entry, cfg.BufferSize),
 		done:   make(chan struct{}),

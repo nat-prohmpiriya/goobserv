@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nat-prohmpiriya/goobserv/pkg/core"
+	middleware "github.com/nat-prohmpiriya/goobserv/pkg/middleware/gin"
 	"github.com/nat-prohmpiriya/goobserv/pkg/output"
 )
 
@@ -28,7 +29,7 @@ func main() {
 
 	// Add middleware
 	r.Use(gin.Recovery())
-	r.Use(gin.Middleware(gin.Config{
+	r.Use(middleware.Middleware(middleware.Config{
 		Observer: obs,
 		SkipPaths: []string{
 			"/health",
@@ -39,14 +40,14 @@ func main() {
 	// Add routes
 	r.GET("/hello", func(c *gin.Context) {
 		// Get observer context
-		ctx := gin.GetContext(c)
-
-		// Log info
-		obs.Info(ctx, "Processing hello request")
+		ctx := middleware.GetContext(c)
 
 		// Start span
-		span, ctx := obs.StartSpan(ctx, "process_hello")
+		span, newCtx := obs.StartSpan(ctx, "process_hello")
 		defer obs.EndSpan(span)
+
+		// Log info
+		obs.Info(newCtx, "Processing hello request")
 
 		// Simulate work
 		time.Sleep(100 * time.Millisecond)
@@ -59,10 +60,14 @@ func main() {
 
 	r.GET("/error", func(c *gin.Context) {
 		// Get observer context
-		ctx := gin.GetContext(c)
+		ctx := middleware.GetContext(c)
+
+		// Start span
+		span, newCtx := obs.StartSpan(ctx, "process_error")
+		defer obs.EndSpan(span)
 
 		// Log error
-		obs.Error(ctx, "Something went wrong").
+		obs.Error(newCtx, "Something went wrong").
 			WithError(fmt.Errorf("test error"))
 
 		// Return error

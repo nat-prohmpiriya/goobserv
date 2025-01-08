@@ -19,9 +19,10 @@ func main() {
 	defer obs.Close()
 
 	// Add stdout output
-	stdout := output.NewStdoutOutput(output.StdoutConfig{
+	stdoutConfig := output.StdoutConfig{
 		Colored: true,
-	})
+	}
+	stdout := output.NewStdoutOutput(stdoutConfig)
 	obs.AddOutput(stdout)
 
 	// Create context

@@ -30,8 +30,12 @@ func main() {
 			// Get observer context
 			ctx := fibermw.GetContext(c)
 
+			// Start span
+			span, newCtx := obs.StartSpan(ctx, "handle_error")
+			defer obs.EndSpan(span)
+
 			// Log error
-			obs.Error(ctx, "Request error").
+			obs.Error(newCtx, "Request error").
 				WithError(err)
 
 			// Return error response
@@ -59,12 +63,12 @@ func main() {
 		// Get observer context
 		ctx := fibermw.GetContext(c)
 
-		// Log info
-		obs.Info(ctx, "Processing hello request")
-
 		// Start span
-		span, ctx := obs.StartSpan(ctx, "process_hello")
+		span, newCtx := obs.StartSpan(ctx, "process_hello")
 		defer obs.EndSpan(span)
+
+		// Log info
+		obs.Info(newCtx, "Processing hello request")
 
 		// Simulate work
 		time.Sleep(100 * time.Millisecond)
@@ -79,8 +83,12 @@ func main() {
 		// Get observer context
 		ctx := fibermw.GetContext(c)
 
+		// Start span
+		span, newCtx := obs.StartSpan(ctx, "process_error")
+		defer obs.EndSpan(span)
+
 		// Log error
-		obs.Error(ctx, "Something went wrong").
+		obs.Error(newCtx, "Something went wrong").
 			WithError(fmt.Errorf("test error"))
 
 		// Return error

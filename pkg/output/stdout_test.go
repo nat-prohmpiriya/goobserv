@@ -23,7 +23,10 @@ func TestStdoutOutput(t *testing.T) {
 		os.Stdout = oldStdout
 	}()
 
-	output := NewStdoutOutput()
+	config := StdoutConfig{
+		Colored: true,
+	}
+	output := NewStdoutOutput(config)
 
 	// Create test entries
 	now := time.Now()

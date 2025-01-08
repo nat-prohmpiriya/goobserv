@@ -2,34 +2,36 @@ package output
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
-	"time"
 
 	"github.com/nat-prohmpiriya/goobserv/pkg/core"
 )
 
+// StdoutConfig represents stdout output configuration
+type StdoutConfig struct {
+	Colored bool // Enable colored output
+}
+
 // StdoutOutput represents stdout output handler
-type StdoutOutput struct{}
+type StdoutOutput struct {
+	config StdoutConfig
+}
 
 // NewStdoutOutput creates a new stdout output handler
-func NewStdoutOutput() *StdoutOutput {
-	return &StdoutOutput{}
+func NewStdoutOutput(config StdoutConfig) *StdoutOutput {
+	return &StdoutOutput{
+		config: config,
+	}
 }
 
 // Write writes entries to stdout
 func (o *StdoutOutput) Write(entries []*core.Entry) error {
 	for _, entry := range entries {
-		// Format timestamp
-		timestamp := entry.Time.Format(time.RFC3339)
-
-		// Format data
+		// Prepare log data
 		data := make(map[string]interface{})
-		for k, v := range entry.Data {
-			data[k] = v
+		if entry.Data != nil {
+			data = entry.Data
 		}
-
-		// Add trace and request IDs
 		if entry.TraceID != "" {
 			data["trace_id"] = entry.TraceID
 		}
@@ -42,20 +44,33 @@ func (o *StdoutOutput) Write(entries []*core.Entry) error {
 
 		// Create log entry
 		logEntry := map[string]interface{}{
-			"timestamp": timestamp,
+			"timestamp": entry.Time.Format("2006-01-02T15:04:05.000Z07:00"),
 			"level":     entry.Level.String(),
 			"message":   entry.Message,
 			"data":      data,
 		}
 
-		// Marshal to JSON
-		jsonBytes, err := json.Marshal(logEntry)
-		if err != nil {
-			return fmt.Errorf("failed to marshal log entry: %v", err)
+		// Add color if enabled
+		if o.config.Colored {
+			switch entry.Level {
+			case core.LevelDebug:
+				logEntry["color"] = "\033[36m" // Cyan
+			case core.LevelInfo:
+				logEntry["color"] = "\033[32m" // Green
+			case core.LevelWarn:
+				logEntry["color"] = "\033[33m" // Yellow
+			case core.LevelError:
+				logEntry["color"] = "\033[31m" // Red
+			}
+			if _, ok := logEntry["color"]; ok {
+				logEntry["reset"] = "\033[0m"
+			}
 		}
 
-		// Write to stdout
-		fmt.Fprintln(os.Stdout, string(jsonBytes))
+		// Encode and write
+		if err := json.NewEncoder(os.Stdout).Encode(logEntry); err != nil {
+			return err
+		}
 	}
 
 	return nil

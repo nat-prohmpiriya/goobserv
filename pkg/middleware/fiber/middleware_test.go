@@ -1,6 +1,7 @@
 package fiber
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -46,7 +47,7 @@ func TestMiddleware(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create observer with shorter flush interval for tests
 			obs := core.NewObserver(core.Config{
-				BufferSize:    10000,  // เพิ่ม buffer size
+				BufferSize:    10000, // เพิ่ม buffer size
 				FlushInterval: 100 * time.Millisecond,
 			})
 			defer obs.Close()
@@ -69,13 +70,15 @@ func TestMiddleware(t *testing.T) {
 			// Add test routes
 			app.Get("/test", func(c *fiber.Ctx) error {
 				ctx := GetContext(c)
-				obs.Info(ctx, "Test endpoint")
+				obs.Info(ctx, "Test endpoint").
+					WithField("path", "/test")
 				return c.JSON(fiber.Map{"status": "ok"})
 			})
 
 			app.Get("/error", func(c *fiber.Ctx) error {
 				ctx := GetContext(c)
-				obs.Error(ctx, "Test error")
+				obs.Error(ctx, "Test error").
+					WithField("path", "/error")
 				return c.Status(500).JSON(fiber.Map{"error": "test error"})
 			})
 
@@ -176,7 +179,7 @@ func TestGetContext(t *testing.T) {
 	assert.NotNil(t, obsCtx)
 
 	// Test with context
-	testCtx := core.NewContext(c.Context())
+	testCtx := context.WithValue(context.Background(), "test", "value")
 	c.Locals("observContext", testCtx)
 	obsCtx = GetContext(c)
 	assert.Equal(t, testCtx, obsCtx)

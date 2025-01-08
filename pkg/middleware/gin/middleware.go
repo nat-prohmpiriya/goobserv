@@ -1,8 +1,8 @@
 package gin
 
 import (
+	"context"
 	"fmt"
-	"path"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +19,7 @@ type Config struct {
 func Middleware(cfg Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip paths
-		path := path.Clean(c.Request.URL.Path)
+		path := c.Request.URL.Path
 		for _, p := range cfg.SkipPaths {
 			if p == path {
 				c.Next()
@@ -32,25 +32,38 @@ func Middleware(cfg Config) gin.HandlerFunc {
 		requestID := c.GetHeader("X-Request-ID")
 
 		// Create context
-		ctx := core.NewContext(c.Request.Context()).
-			WithTraceID(traceID).
-			WithRequestID(requestID)
+		ctx := context.WithValue(c.Request.Context(), "request_id", requestID)
+		ctx = context.WithValue(ctx, "trace_id", traceID)
 
 		// Set context and observer
 		c.Set("observContext", ctx)
 		c.Set("observer", cfg.Observer)
 
 		// Start span
-		spanCtx := cfg.Observer.StartSpan(ctx, fmt.Sprintf("%s %s", c.Request.Method, path))
+		span, ctx := cfg.Observer.StartSpan(ctx, fmt.Sprintf("%s %s", c.Request.Method, path))
 		defer func(start time.Time) {
 			// Log request
-			cfg.Observer.Info(spanCtx, "HTTP Request",
-				"method", c.Request.Method,
-				"path", path,
-				"status", c.Writer.Status(),
-				"duration_ms", time.Since(start).Milliseconds(),
-			)
-			cfg.Observer.EndSpan(spanCtx)
+			status := c.Writer.Status()
+			if status >= 500 {
+				cfg.Observer.Error(ctx, "HTTP Request").
+					WithField("method", c.Request.Method).
+					WithField("path", path).
+					WithField("status", status).
+					WithField("duration_ms", time.Since(start).Milliseconds())
+			} else if status >= 400 {
+				cfg.Observer.Warn(ctx, "HTTP Request").
+					WithField("method", c.Request.Method).
+					WithField("path", path).
+					WithField("status", status).
+					WithField("duration_ms", time.Since(start).Milliseconds())
+			} else {
+				cfg.Observer.Info(ctx, "HTTP Request").
+					WithField("method", c.Request.Method).
+					WithField("path", path).
+					WithField("status", status).
+					WithField("duration_ms", time.Since(start).Milliseconds())
+			}
+			cfg.Observer.EndSpan(span)
 		}(time.Now())
 
 		// Process request
@@ -59,13 +72,13 @@ func Middleware(cfg Config) gin.HandlerFunc {
 }
 
 // GetContext returns the observer context from gin context
-func GetContext(c *gin.Context) *core.Context {
+func GetContext(c *gin.Context) context.Context {
 	if ctx, exists := c.Get("observContext"); exists {
-		if obsCtx, ok := ctx.(*core.Context); ok {
+		if obsCtx, ok := ctx.(context.Context); ok {
 			return obsCtx
 		}
 	}
-	return core.NewContext(c.Request.Context())
+	return context.Background()
 }
 
 // GetObserver returns the observer from gin context

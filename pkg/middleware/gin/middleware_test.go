@@ -1,6 +1,7 @@
 package gin
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -71,13 +72,15 @@ func TestMiddleware(t *testing.T) {
 			// Add test routes
 			r.GET("/test", func(c *gin.Context) {
 				ctx := GetContext(c)
-				obs.Info(ctx, "Test endpoint")
+				obs.Info(ctx, "Test endpoint").
+					WithField("path", "/test")
 				c.JSON(200, gin.H{"status": "ok"})
 			})
 
 			r.GET("/error", func(c *gin.Context) {
 				ctx := GetContext(c)
-				obs.Error(ctx, "Test error")
+				obs.Error(ctx, "Test error").
+					WithField("path", "/error")
 				c.JSON(500, gin.H{"error": "test error"})
 			})
 
@@ -142,7 +145,7 @@ func TestGetContext(t *testing.T) {
 	assert.NotNil(t, ctx)
 
 	// Test with context
-	testCtx := core.NewContext(c.Request.Context())
+	testCtx := context.WithValue(context.Background(), "test", "value")
 	c.Set("observContext", testCtx)
 	ctx = GetContext(c)
 	assert.Equal(t, testCtx, ctx)

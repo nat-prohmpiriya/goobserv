@@ -1,8 +1,8 @@
 package core
 
 import (
-	"fmt"
-	"math/rand"
+	"crypto/rand"
+	"encoding/hex"
 	"sync"
 	"time"
 )
@@ -38,42 +38,33 @@ type SpanEvent struct {
 
 // TraceID generates a new trace ID
 func TraceID() string {
-	return generateID("trace")
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(bytes)
 }
 
 // SpanID generates a new span ID
 func SpanID() string {
-	return generateID("span")
+	bytes := make([]byte, 8)
+	if _, err := rand.Read(bytes); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(bytes)
 }
 
 // RequestID generates a new request ID
 func RequestID() string {
-	return generateID("req")
-}
-
-// generateID generates a new ID with prefix
-func generateID(prefix string) string {
-	// Initialize random seed
-	rand.Seed(time.Now().UnixNano())
-
-	// Generate random bytes
-	b := make([]byte, 16)
-	for i := range b {
-		b[i] = byte(rand.Intn(256))
+	bytes := make([]byte, 8)
+	if _, err := rand.Read(bytes); err != nil {
+		return ""
 	}
-
-	// Format ID
-	return fmt.Sprintf("%s-%x-%x-%x-%x",
-		prefix,
-		b[0:4],
-		b[4:6],
-		b[6:8],
-		b[8:],
-	)
+	return hex.EncodeToString(bytes)
 }
 
 // NewSpan creates a new span
-func NewSpan(name string, ctx *Context) *Span {
+func NewSpan(name string) *Span {
 	return &Span{
 		TraceID:    TraceID(),
 		SpanID:     SpanID(),

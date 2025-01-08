@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -20,6 +21,9 @@ type Observer struct {
 	closed bool
 	mu     sync.Mutex
 	wg     sync.WaitGroup
+
+	// Metrics
+	metrics map[string]interface{}
 }
 
 // NewObserver creates a new observer instance
@@ -44,6 +48,7 @@ func NewObserver(cfg Config) *Observer {
 	obs := &Observer{
 		buffer: make(chan *Entry, cfg.BufferSize),
 		done:   make(chan struct{}),
+		metrics: make(map[string]interface{}),
 	}
 
 	// Start worker
@@ -55,37 +60,96 @@ func NewObserver(cfg Config) *Observer {
 
 // AddOutput adds an output handler
 func (o *Observer) AddOutput(output Output) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.outputs = append(o.outputs, output)
 }
 
+// Counter creates a new counter metric
+func (o *Observer) Counter(name string) *Counter {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if m, ok := o.metrics[name]; ok {
+		if counter, ok := m.(*Counter); ok {
+			return counter
+		}
+	}
+
+	counter := NewCounter(name)
+	o.metrics[name] = counter
+	return counter
+}
+
+// Gauge creates a new gauge metric
+func (o *Observer) Gauge(name string) *Gauge {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if m, ok := o.metrics[name]; ok {
+		if gauge, ok := m.(*Gauge); ok {
+			return gauge
+		}
+	}
+
+	gauge := NewGauge(name)
+	o.metrics[name] = gauge
+	return gauge
+}
+
+// Histogram creates a new histogram metric
+func (o *Observer) Histogram(name string, buckets []float64) *Histogram {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if m, ok := o.metrics[name]; ok {
+		if histogram, ok := m.(*Histogram); ok {
+			return histogram
+		}
+	}
+
+	histogram := NewHistogram(name, buckets)
+	o.metrics[name] = histogram
+	return histogram
+}
+
 // StartSpan starts a new span
-func (o *Observer) StartSpan(ctx *Context, name string) *Context {
-	return ctx.WithSpan(name)
+func (o *Observer) StartSpan(ctx context.Context, name string) (*Span, context.Context) {
+	span := NewSpan(name)
+	span.TraceID = TraceID()
+	span.SpanID = SpanID()
+
+	if parentSpan, ok := ctx.Value(spanKey).(*Span); ok {
+		span.ParentID = parentSpan.SpanID
+		span.TraceID = parentSpan.TraceID
+	}
+
+	return span, context.WithValue(ctx, spanKey, span)
 }
 
 // EndSpan ends the current span
-func (o *Observer) EndSpan(ctx *Context) {
-	ctx.EndSpan()
+func (o *Observer) EndSpan(span *Span) {
+	span.End()
 }
 
 // Debug logs a debug message
-func (o *Observer) Debug(ctx *Context, msg string, args ...interface{}) {
-	o.log(ctx, LevelDebug, msg, args...)
+func (o *Observer) Debug(ctx context.Context, msg string) *Entry {
+	return o.log(ctx, LevelDebug, msg)
 }
 
 // Info logs an info message
-func (o *Observer) Info(ctx *Context, msg string, args ...interface{}) {
-	o.log(ctx, LevelInfo, msg, args...)
+func (o *Observer) Info(ctx context.Context, msg string) *Entry {
+	return o.log(ctx, LevelInfo, msg)
 }
 
 // Warn logs a warning message
-func (o *Observer) Warn(ctx *Context, msg string, args ...interface{}) {
-	o.log(ctx, LevelWarn, msg, args...)
+func (o *Observer) Warn(ctx context.Context, msg string) *Entry {
+	return o.log(ctx, LevelWarn, msg)
 }
 
 // Error logs an error message
-func (o *Observer) Error(ctx *Context, msg string, args ...interface{}) {
-	o.log(ctx, LevelError, msg, args...)
+func (o *Observer) Error(ctx context.Context, msg string) *Entry {
+	return o.log(ctx, LevelError, msg)
 }
 
 // Close closes the observer
@@ -96,15 +160,18 @@ func (o *Observer) Close() error {
 		return nil
 	}
 	o.closed = true
-	close(o.done)
 	o.mu.Unlock()
 
+	// Signal worker to stop
+	close(o.done)
+
+	// Wait for worker to finish
 	o.wg.Wait()
 
 	// Close outputs
 	for _, output := range o.outputs {
 		if err := output.Close(); err != nil {
-			return err
+			return fmt.Errorf("failed to close output: %v", err)
 		}
 	}
 
@@ -112,79 +179,92 @@ func (o *Observer) Close() error {
 }
 
 // log logs a message with the given level
-func (o *Observer) log(ctx *Context, level Level, msg string, args ...interface{}) {
-	// Create entry
+func (o *Observer) log(ctx context.Context, level Level, msg string) *Entry {
 	entry := &Entry{
-		Time:      time.Now(),
-		Level:     level,
-		Message:   msg,
-		TraceID:   ctx.TraceID(),
-		SpanID:    ctx.SpanID(),
-		RequestID: ctx.RequestID(),
-		Data:      make(map[string]interface{}),
+		Time:    time.Now(),
+		Level:   level,
+		Message: msg,
+		Data:    make(map[string]interface{}),
 	}
 
-	// Add data
-	for i := 0; i < len(args)-1; i += 2 {
-		if key, ok := args[i].(string); ok {
-			entry.Data[key] = args[i+1]
-		}
+	// Add span information
+	if span, ok := ctx.Value(spanKey).(*Span); ok {
+		entry.TraceID = span.TraceID
+		entry.SpanID = span.SpanID
 	}
 
-	// Send entry to buffer
+	// Add request ID
+	if reqID, ok := ctx.Value(requestIDKey).(string); ok {
+		entry.RequestID = reqID
+	}
+
+	// Send to buffer
 	select {
 	case o.buffer <- entry:
-		fmt.Printf("Observer: entry sent to buffer: %s\n", entry.Message)
 	default:
-		fmt.Printf("Observer: buffer full, dropping entry: %s\n", entry.Message)
+		// Buffer is full, drop entry
 	}
+
+	return entry
 }
 
 // worker processes entries from buffer
 func (o *Observer) worker(interval time.Duration) {
 	defer o.wg.Done()
 
-	fmt.Printf("Observer: worker started with interval %v\n", interval)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	entries := make([]*Entry, 0)
+	var entries []*Entry
 
 	for {
 		select {
-		case entry := <-o.buffer:
-			fmt.Printf("Observer: received entry from buffer: %s\n", entry.Message)
-			entries = append(entries, entry)
-		case <-ticker.C:
-			if len(entries) > 0 {
-				fmt.Printf("Observer: flushing %d entries\n", len(entries))
-				o.flush(entries)
-				entries = make([]*Entry, 0)
-			}
 		case <-o.done:
 			if len(entries) > 0 {
-				fmt.Printf("Observer: final flush of %d entries\n", len(entries))
 				o.flush(entries)
 			}
-			fmt.Println("Observer: worker stopped")
 			return
+		case entry := <-o.buffer:
+			entries = append(entries, entry)
+			if len(entries) >= cap(o.buffer) {
+				o.flush(entries)
+				entries = entries[:0]
+			}
+		case <-ticker.C:
+			if len(entries) > 0 {
+				o.flush(entries)
+				entries = entries[:0]
+			}
 		}
 	}
 }
 
 // flush flushes entries to outputs
 func (o *Observer) flush(entries []*Entry) {
-	for _, output := range o.outputs {
+	o.mu.Lock()
+	outputs := make([]Output, len(o.outputs))
+	copy(outputs, o.outputs)
+	o.mu.Unlock()
+
+	for _, output := range outputs {
 		if err := output.Write(entries); err != nil {
-			// Handle error
-			continue
+			fmt.Printf("failed to write entries: %v\n", err)
+		}
+	}
+}
+
+// Flush flushes any pending entries
+func (o *Observer) Flush() error {
+	o.mu.Lock()
+	outputs := make([]Output, len(o.outputs))
+	copy(outputs, o.outputs)
+	o.mu.Unlock()
+
+	for _, output := range outputs {
+		if err := output.Flush(); err != nil {
+			return fmt.Errorf("failed to flush output: %v", err)
 		}
 	}
 
-	for _, output := range o.outputs {
-		if err := output.Flush(); err != nil {
-			// Handle error
-			continue
-		}
-	}
+	return nil
 }

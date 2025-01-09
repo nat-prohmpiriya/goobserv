@@ -154,3 +154,156 @@ func main() {
    - Log errors with context
    - Include error details
    - Use appropriate log level
+
+
+## Log Format
+```json
+{
+    "request_id": "123",
+    "trace_id": "456",
+    "correlation_id": "789",
+    "user_id": "user_123",
+    "start_time": "2025-01-08T20:11:30+07:00",
+    "end_time": "2025-01-08T20:11:30.500+07:00",
+    "duration": 0.5,
+    "state": "success",
+    "headers": {
+
+    },
+   "client": {
+      "ip": "203.0.113.195",
+      "user_agent": {
+         "browser": "Chrome",
+         "browser_version": "120.0.0",
+         "os": "MacOS",
+         "os_version": "14.2.1",
+         "device_type": "desktop",
+         "is_mobile": false
+      },
+   },
+
+    "spans": [
+        {
+            "function": "CreateUser",
+            "layer": "handler",
+            "start_time": "...",
+            "end_time": "...",
+            "input": {...},
+            "output": {...},
+            "span_id": "1",
+            "parent_span_id": "0",
+            "duration": 0.2
+        },
+        {
+            "function": "CreateUser", // function name
+            "layer": "usecase", // package name
+            "start_time": "...",
+            "end_time": "...",
+            "input": {...},
+            "output": {...},
+            "span_id": "2",
+            "parent_span_id": "1",
+            "duration": 0.3
+        },
+        {
+            "function": "CreateUser", // function name
+            "layer": "usecase", // package name
+            "start_time": "...",
+            "end_time": "...",
+            "input": {...},
+            "output": {...},
+            "level": "debug",
+            "span_id": "3",
+            "parent_span_id": "2",
+            "duration": 0.3
+        },
+        {
+            "function": "CreateUser",
+            "layer": "repository",
+            "start_time": "...",
+            "end_time": "...",
+            "input": {...},
+            "output": {...},
+            "span_id": "4",
+            "parent_span_id": "3",
+            "duration": 0.1
+        }
+    ],
+    "metrics": {
+        "service_duration": 0.4
+    }
+}
+```
+
+### new format 
+
+```json
+{
+    // ข้อมูลพื้นฐานของ Request
+    "request_id": "123",
+    "trace_id": "456",
+    "user_id": "user_123",
+    "start_time": "2025-01-08T20:11:30+07:00",
+    "end_time": "2025-01-08T20:11:30.500+07:00",
+    "duration": 0.5,
+    "state": "success",
+    "method": "POST",
+    "original_path": "/users?page=1",
+
+    // Spans (การทำงานแต่ละขั้นตอน)
+    "spans": [
+        // auto create by lib
+        {
+            "function": "handler.CreateUser", // package.function 
+            "start_time": "2025-01-08T20:11:30.000+07:00",
+            "end_time": "2025-01-08T20:11:30.200+07:00",
+            "duration": 0.2,
+            "input": {...},
+            "output": {...},
+            "span_id": "1",
+        }
+        {
+            "function": "usecase.CreateUser", // package.function
+            "start_time": "2025-01-08T20:11:30.000+07:00",
+            "end_time": "2025-01-08T20:11:30.200+07:00",
+            "duration": 0.2,
+            "input": {...},
+            "output": {...},
+            "span_id": "2",
+        }
+      // manual create by dev
+        {
+            "function": "usecase.CreateUser", // package.function
+            "start_time": "2025-01-08T20:11:30.000+07:00",
+            "end_time": "2025-01-08T20:11:30.200+07:00",
+            "duration": 0.2,
+            "input": {},
+            "output": {},
+            "envent": {
+               "level": "debug", // info, warn, error, debug
+               "message": "User id...."
+            },
+            "span_id": "3",
+        }
+        // manual create by system
+        {
+            "function": "repository.CreateUser", // package.function
+            "start_time": "2025-01-08T20:11:30.000+07:00",
+            "end_time": "2025-01-08T20:11:30.200+07:00",
+            "duration": 0.2,
+            "input": {...},
+            "output": {...},
+            "span_id": "4",
+        }
+        // spans อื่นๆ...
+    ],
+
+    // ข้อมูล Error (มีเมื่อ state เป็น error)
+    "error": {
+        "code": "USER_ALREADY_EXISTS",
+        "message": "User with email already exists",
+        "stack_trace": "...", // เฉพาะ development
+        "details": {}
+    }
+}
+```

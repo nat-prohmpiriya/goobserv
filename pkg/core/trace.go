@@ -1,120 +1,102 @@
 package core
 
-import (
-	"crypto/rand"
-	"encoding/hex"
-	"sync"
-	"time"
-)
+// // Event represents a log event
+// type Event struct {
+// 	Level   string `json:"level"` // debug, info, warn, error
+// 	Message string `json:"message"`
+// }
 
-// SpanStatus represents the status of a span
-type SpanStatus int
+// // Span represents a function execution or manual log
+// type Span struct {
+// 	Function  string                 `json:"function"` // package.function
+// 	StartTime time.Time              `json:"start_time"`
+// 	EndTime   time.Time              `json:"end_time"`
+// 	Duration  float64                `json:"duration"`
+// 	Input     map[string]interface{} `json:"input,omitempty"`
+// 	Output    map[string]interface{} `json:"output,omitempty"`
+// 	Event     *Event                 `json:"event,omitempty"` // for manual logging
+// 	SpanID    string                 `json:"span_id"`
+// }
 
-const (
-	SpanStatusOK SpanStatus = iota
-	SpanStatusError
-)
+// // Error represents error details
+// type Error struct {
+// 	Code       string                 `json:"code"`
+// 	Message    string                 `json:"message"`
+// 	StackTrace string                 `json:"stack_trace,omitempty"`
+// 	Details    map[string]interface{} `json:"details,omitempty"`
+// }
 
-// Span represents a single operation within a trace
+// type entryKey struct{}
+
+// // Log Entry represents a complete request log
+// type Entry struct {
+// 	RequestID    string    `json:"request_id"`
+// 	TraceID      string    `json:"trace_id"`
+// 	UserID       string    `json:"user_id,omitempty"`
+// 	StartTime    time.Time `json:"start_time"`
+// 	EndTime      time.Time `json:"end_time"`
+// 	Duration     float64   `json:"duration"`
+// 	State        string    `json:"state"` // processing, success, error
+// 	Method       string    `json:"method"`
+// 	OriginalPath string    `json:"original_path"`
+// 	Spans        []Span    `json:"spans"`
+// 	Error        *Error    `json:"error,omitempty"`
+// }
+
+// // NewEntry creates a new entry
+// func NewEntry() *Entry {
+// 	return &Entry{
+// 		StartTime: time.Now(),
+// 		State:     "processing",
+// 		Spans:     make([]Span, 0),
+// 	}
+// }
+
+// // WithEntry adds an entry to context
+// func WithEntry(ctx context.Context, entry *Entry) context.Context {
+// 	return context.WithValue(ctx, entryKey{}, entry)
+// }
+
+// // GetEntry gets the current entry from context
+// func GetEntry(ctx context.Context) *Entry {
+// 	if entry, ok := ctx.Value(entryKey{}).(*Entry); ok {
+// 		return entry
+// 	}
+// 	return nil
+// }
+
+// // AddSpan adds a span to the entry
+// func (e *Entry) AddSpan(span Span) {
+// 	span.SpanID = fmt.Sprintf("%d", len(e.Spans)+1)
+// 	e.Spans = append(e.Spans, span)
+// }
+
+// // End marks the entry as completed
+// func (e *Entry) End() {
+// 	e.EndTime = time.Now()
+// 	e.Duration = e.EndTime.Sub(e.StartTime).Seconds()
+// 	if e.Error == nil {
+// 		e.State = "success"
+// 	} else {
+// 		e.State = "error"
+// 	}
+// }
+
+// // WithError adds error details to the entry
+// func (e *Entry) WithError(err error, code string, details map[string]interface{}) *Entry {
+// 	e.Error = &Error{
+// 		Code:    code,
+// 		Message: err.Error(),
+// 		Details: details,
+// 	}
+// 	if obs := GetObserver(context.Background()); obs != nil && obs.config.Development {
+// 		e.Error.StackTrace = string(debug.Stack())
+// 	}
+// 	return e
+// }
+
+type Trace struct {
+}
+
 type Span struct {
-	TraceID    string
-	SpanID     string
-	ParentID   string
-	Name       string
-	StartTime  time.Time
-	EndTime    time.Time
-	Status     SpanStatus
-	Attributes map[string]interface{}
-	Events     []SpanEvent
-	mu         sync.RWMutex
-}
-
-// SpanEvent represents an event within a span
-type SpanEvent struct {
-	Time       time.Time
-	Name       string
-	Attributes map[string]interface{}
-}
-
-// TraceID generates a new trace ID
-func TraceID() string {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		return ""
-	}
-	return hex.EncodeToString(bytes)
-}
-
-// SpanID generates a new span ID
-func SpanID() string {
-	bytes := make([]byte, 8)
-	if _, err := rand.Read(bytes); err != nil {
-		return ""
-	}
-	return hex.EncodeToString(bytes)
-}
-
-// RequestID generates a new request ID
-func RequestID() string {
-	bytes := make([]byte, 8)
-	if _, err := rand.Read(bytes); err != nil {
-		return ""
-	}
-	return hex.EncodeToString(bytes)
-}
-
-// NewSpan creates a new span
-func NewSpan(name string) *Span {
-	return &Span{
-		TraceID:    TraceID(),
-		SpanID:     SpanID(),
-		ParentID:   "",
-		Name:       name,
-		StartTime:  time.Now(),
-		Status:     SpanStatusOK,
-		Attributes: make(map[string]interface{}),
-		Events:     make([]SpanEvent, 0),
-	}
-}
-
-// End ends the span
-func (s *Span) End() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.EndTime = time.Now()
-}
-
-// SetStatus sets the span status
-func (s *Span) SetStatus(status SpanStatus) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Status = status
-}
-
-// SetAttribute sets a span attribute
-func (s *Span) SetAttribute(key string, value interface{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Attributes[key] = value
-}
-
-// AddEvent adds an event to the span
-func (s *Span) AddEvent(name string, attrs map[string]interface{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Events = append(s.Events, SpanEvent{
-		Time:       time.Now(),
-		Name:       name,
-		Attributes: attrs,
-	})
-}
-
-// Duration returns the span duration
-func (s *Span) Duration() time.Duration {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.EndTime.IsZero() {
-		return time.Since(s.StartTime)
-	}
-	return s.EndTime.Sub(s.StartTime)
 }

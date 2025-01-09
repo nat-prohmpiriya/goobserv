@@ -1,7 +1,7 @@
 package output
 
 import (
-	"fmt"
+	"encoding/json"
 	"os"
 	"time"
 
@@ -10,17 +10,19 @@ import (
 
 // StdoutConfig represents stdout output configuration
 type StdoutConfig struct {
-	Colored bool // Enable colored output
+	Pretty bool
 }
 
 // StdoutOutput represents stdout output handler
 type StdoutOutput struct {
+	stdout *os.File
 	config StdoutConfig
 }
 
 // NewStdoutOutput creates a new stdout output handler
 func NewStdoutOutput(config StdoutConfig) *StdoutOutput {
 	return &StdoutOutput{
+		stdout: os.Stdout,
 		config: config,
 	}
 }
@@ -28,59 +30,71 @@ func NewStdoutOutput(config StdoutConfig) *StdoutOutput {
 // Write writes entries to stdout
 func (o *StdoutOutput) Write(entries []*core.Entry) error {
 	for _, entry := range entries {
-		// Prepare color codes
-		var color, reset string
-		if o.config.Colored {
-			switch entry.Level {
-			case core.LevelDebug:
-				color = "\033[36m" // Cyan
-			case core.LevelInfo:
-				color = "\033[32m" // Green
-			case core.LevelWarn:
-				color = "\033[33m" // Yellow
-			case core.LevelError:
-				color = "\033[31m" // Red
-			}
-			if color != "" {
-				reset = "\033[0m"
-			}
+		// Create log entry
+		logEntry := LogEntry{
+			TraceID:      entry.TraceID,
+			RequestID:    entry.RequestID,
+			StartTime:    entry.StartTime.Format(time.RFC3339),
+			EndTime:      entry.EndTime.Format(time.RFC3339),
+			Duration:     entry.Duration,
+			State:       entry.State,
+			Method:      entry.Method,
+			OriginalPath: entry.OriginalPath,
+			Metadata:    make(map[string]interface{}),
+			Errors:      make([]string, 0),
 		}
 
-		// Format log message
-		msg := fmt.Sprintf("%s[%s] %s | trace=%s span=%s",
-			color,
-			entry.Level.String(),
-			entry.Message,
-			entry.TraceID,
-			entry.SpanID,
-		)
+		// Convert spans
+		for _, span := range entry.Spans {
+			spanEntry := &SpanEntry{
+				Function:  span.Function,
+				StartTime: span.StartTime.Format(time.RFC3339),
+				EndTime:   span.EndTime.Format(time.RFC3339),
+				Duration:  span.Duration,
+				Input:     span.Input,
+				Output:    span.Output,
+				SpanID:    span.SpanID,
+			}
+			
+			if span.Event != nil {
+				spanEntry.Event = &EventEntry{
+					Level:   span.Event.Level,
+					Message: span.Event.Message,
+				}
+			}
+			
+			logEntry.Spans = append(logEntry.Spans, spanEntry)
+		}
 
 		// Add error if present
-		if entry.Data != nil {
-			if err, ok := entry.Data["error"]; ok {
-				msg += fmt.Sprintf(" | error=%v", err)
-			}
+		if entry.Error != nil {
+			logEntry.Errors = append(logEntry.Errors, entry.Error.Message)
+			logEntry.State = "error"
 		}
 
-		// Add reset code
-		msg += reset
-
-		// Write to stdout with timestamp
-		fmt.Fprintf(os.Stdout, "%s %s\n",
-			entry.Time.Format(time.RFC3339),
-			msg,
-		)
+		// Encode and write
+		var err error
+		if o.config.Pretty {
+			encoder := json.NewEncoder(o.stdout)
+			encoder.SetIndent("", "  ")
+			err = encoder.Encode(logEntry)
+		} else {
+			err = json.NewEncoder(o.stdout).Encode(logEntry)
+		}
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-// Flush flushes the output
+// Flush flushes stdout
 func (o *StdoutOutput) Flush() error {
 	return nil
 }
 
-// Close closes the output
+// Close closes stdout
 func (o *StdoutOutput) Close() error {
 	return nil
 }

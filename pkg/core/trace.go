@@ -1,5 +1,9 @@
 package core
 
+import (
+	"time"
+)
+
 // // Event represents a log event
 // type Event struct {
 // 	Level   string `json:"level"` // debug, info, warn, error
@@ -95,8 +99,27 @@ package core
 // 	return e
 // }
 
-type Trace struct {
+type Span struct {
 }
 
-type Span struct {
+func NewSpan() *Span {
+	return &Span{}
+}
+
+type Trace struct {
+	Spans     []*Span
+	TraceID   string
+	RequestID string
+	UserID    string
+	StartTime time.Time
+	EndTime   time.Time
+    Duration  float64
+    State     string
+    Method    string
+    OriginalPath string
+    
+}
+
+func NewTrace() *Trace {
+	return &Trace{}
 }
